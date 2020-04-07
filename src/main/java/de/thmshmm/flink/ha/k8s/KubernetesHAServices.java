@@ -1,13 +1,11 @@
 package de.thmshmm.flink.ha.k8s;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.blob.BlobStore;
 import org.apache.flink.runtime.blob.BlobStoreService;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.runtime.checkpoint.CheckpointRecoveryFactory;
-import org.apache.flink.runtime.checkpoint.CompletedCheckpoint;
 import org.apache.flink.runtime.checkpoint.CompletedCheckpointStore;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.highavailability.RunningJobsRegistry;
@@ -21,9 +19,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.concurrent.GuardedBy;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -34,6 +29,8 @@ public class KubernetesHAServices implements HighAvailabilityServices {
     protected final Object lock = new Object();
 
     private boolean shutdown;
+
+    private final KubernetesStateHandler kubernetesStateHandler;
 
     /**
      * The runtime configuration.
@@ -60,8 +57,9 @@ public class KubernetesHAServices implements HighAvailabilityServices {
     private final String dispatcherRpcUrl;
     private final String webMonitorAddress;
 
-    public KubernetesHAServices(Configuration configuration, RunningJobsRegistry runningJobsRegistry, BlobStoreService blobStoreService, JobGraphStore jobGraphStore, String jobManagerRpcUrl, String resourceManagerRpcUrl, String dispatcherRpcUrl, String webMonitorAddress) {
+    public KubernetesHAServices(Configuration configuration, KubernetesStateHandler kubernetesStateHandler, RunningJobsRegistry runningJobsRegistry, BlobStoreService blobStoreService, JobGraphStore jobGraphStore, String jobManagerRpcUrl, String resourceManagerRpcUrl, String dispatcherRpcUrl, String webMonitorAddress) {
         this.configuration = configuration;
+        this.kubernetesStateHandler = kubernetesStateHandler;
         this.runningJobsRegistry = runningJobsRegistry;
         this.blobStoreService = blobStoreService;
         this.jobManagerRpcUrl = jobManagerRpcUrl;
@@ -76,76 +74,12 @@ public class KubernetesHAServices implements HighAvailabilityServices {
         return new CheckpointRecoveryFactory() {
             @Override
             public CompletedCheckpointStore createCheckpointStore(JobID jobId, int maxNumberOfCheckpointsToRetain, ClassLoader userClassLoader) throws Exception {
-                return new CompletedCheckpointStore() {
-                    private List<CompletedCheckpoint> checkpoints = new ArrayList<>();
-
-                    @Override
-                    public void recover() throws Exception {
-
-                    }
-
-                    @Override
-                    public void addCheckpoint(CompletedCheckpoint checkpoint) throws Exception {
-                        checkpoints.add(checkpoint);
-                    }
-
-                    @Override
-                    public void shutdown(JobStatus jobStatus) throws Exception {
-
-                    }
-
-                    @Override
-                    public List<CompletedCheckpoint> getAllCheckpoints() throws Exception {
-                        return checkpoints;
-                    }
-
-                    @Override
-                    public int getNumberOfRetainedCheckpoints() {
-                        return checkpoints.size();
-                    }
-
-                    @Override
-                    public int getMaxNumberOfRetainedCheckpoints() {
-                        return 10;
-                    }
-
-                    @Override
-                    public boolean requiresExternalizedCheckpoints() {
-                        return true;
-                    }
-                };
+                return new FSCompletedCheckpointStore(configuration, jobId, userClassLoader, maxNumberOfCheckpointsToRetain);
             }
 
             @Override
             public CheckpointIDCounter createCheckpointIDCounter(JobID jobId) throws Exception {
-                return new CheckpointIDCounter() {
-                    AtomicLong counter = new AtomicLong(0);
-
-                    @Override
-                    public void start() throws Exception {
-
-                    }
-
-                    @Override
-                    public void shutdown(JobStatus jobStatus) throws Exception {
-
-                    }
-
-                    @Override
-                    public long getAndIncrement() throws Exception {
-                        return counter.getAndIncrement();
-                    }
-
-                    @Override
-                    public long get() {
-                        return counter.get();
-                    }
-
-                    @Override
-                    public void setCount(long newId) throws Exception {
-                        counter.set(newId);
-                    }
-                };
+                return new KubernetesCheckpointIDCounter(jobId, kubernetesStateHandler);
             }
         };
     }

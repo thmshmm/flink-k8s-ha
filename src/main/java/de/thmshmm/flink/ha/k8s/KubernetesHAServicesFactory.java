@@ -61,6 +61,7 @@ public class KubernetesHAServicesFactory implements HighAvailabilityServicesFact
 
         return new KubernetesHAServices(
                 configuration,
+                kubernetesStateHandler,
                 runningJobsRegistry,
                 blobStoreService,
                 jobGraphStore,

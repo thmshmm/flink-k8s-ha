@@ -19,6 +19,7 @@ public class KubernetesStateHandler {
     private static final Logger LOG = LoggerFactory.getLogger(KubernetesStateHandler.class);
 
     private final String STATE_SCHEDULING_STATUS_KEY = "schedulingStatus";
+    private final String STATE_CHECKPOINT_ID_COUNTER_KEY = "checkpointIdCounter";
 
     private final Configuration configuration;
     private final KubernetesClient client;
@@ -59,10 +60,24 @@ public class KubernetesStateHandler {
         return RunningJobsRegistry.JobSchedulingStatus.valueOf(state);
     }
 
+    public long getCheckpointIDCounter(JobID jobID) {
+        return Long.valueOf(client.configMaps().withName(getJobConfigMapName(jobID)).get().getData().get(STATE_CHECKPOINT_ID_COUNTER_KEY));
+    }
+
+    public void updateCheckpointIDCounter(JobID jobID, long counter) throws IOException {
+        ConfigMap configMap = client.configMaps()
+                .withName(getJobConfigMapName(jobID))
+                .edit()
+                .removeFromData(STATE_CHECKPOINT_ID_COUNTER_KEY)
+                .addToData(STATE_CHECKPOINT_ID_COUNTER_KEY, String.valueOf(counter))
+                .done();
+    }
+
     private void createInitialConfigMap(JobID jobID) throws IOException {
         LOG.info("Creating an initial job state ConfigMap for job {}", jobID.toHexString());
         HashMap<String, String> initialStateData = new HashMap<>();
         initialStateData.put(STATE_SCHEDULING_STATUS_KEY, RunningJobsRegistry.JobSchedulingStatus.PENDING.name());
+        initialStateData.put(STATE_CHECKPOINT_ID_COUNTER_KEY, "1");
         ConfigMap configMap = client.configMaps().create(
                 new ConfigMapBuilder()
                         .withNewMetadata()
